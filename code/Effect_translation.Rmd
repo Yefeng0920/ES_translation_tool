@@ -1,0 +1,201 @@
+---
+title: "Tools for translating effect sizes into plain language"
+author: "Yefeng Yang, František Bartoš, Jinming Pan, Malgorzata Lagisz, & Shinichi Nakagawa"
+date: "last update March 2025"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(ggdist)
+```
+
+
+# Introduction
+
+This online tool aims to provide the custom `R` code that can translate standardized effect sizes into intuitive scales that are more accessible to different stakeholders, including fellow researchers, editors, policymakers and practitioners. 
+
+The custom `R` code include two parts:
+
+- Computation of translated effect sizes
+
+Specifying a `Cohen’s d` or `Hedge’s g`to `d_to_CLES()` will automatically translate standardized effect size into 5 intuitive metrics.
+
+- Visualization of the translated effect sizes
+
+Specifying a `Cohen’s d` or `Hedge’s g`to `plot_overlap` and `plot_u3` can visualize the translated effect sizes. 
+
+We use a real example to illustrate the use of the custom `R` code and the proper interpretation of translated effect sizes. We recommend reading our main paper before using this online tool:
+
+> Yang, Y.,  Bartoš, F., Pan, J., Lagisz, M., & Nakagawa, S. (2025). Calibrating effect size interpretation in ecology and evolution: A quantitative synthesis of 100,000 observations.
+
+For alternative tools, please refer to the following references:
+
+> Magnusson, K. (2023). A causal inference perspective on therapist effects. PsyArXiv.
+
+> JASP Team (2024). JASP (Version 0.19.3)[Computer software].
+
+This document introduces five metrics and applies them to a real-world example: the impact of artificial light at night (ALAN) on melatonin suppression in animals.
+
+# Translation of effect sizes
+
+Below, we define a function that computes five translated effect sizes based on `Cohen’s d` (standardized measures of differences between groups).
+
+```{r}
+# function to compute all five metrics
+d_to_CLES <- function(d) {
+  list(
+    Probability_of_Superiority = stats::pnorm(abs(d) / sqrt(2)),   # probability that a randomly selected case from group 1 exceeds one from group 2
+    Overlap = 2 * stats::pnorm(-abs(d) / 2),                 # proportion of overlap between the two distributions
+    Cohen_U1 = (2 * stats::pnorm(abs(d) / 2) - 1) / stats::pnorm(abs(d) / 2),  # proportion of cases in group 1 that do not overlap with group 2
+    Cohen_U2 = stats::pnorm(abs(d) / 2),                     # proportion of cases in the lower distribution that exceed the median of the upper distribution
+    Cohen_U3 = stats::pnorm(abs(d))                               # proportion of group 1 above the mean of group 2
+  )
+}
+```
+
+
+# Example: The impact of artificial light at night (ALAN)
+
+Artificial light at night (ALAN) is known to suppress melatonin production in animals. In a study, the effect size (`Cohen's d`) for ALAN’s impact on melatonin suppression was -0.25. 
+
+Under normal distribution, `Cohen's d` of -0.25 can be easily translated via:
+
+```{r}
+# Example: Impact of artificial light at night (ALAN) on melatonin suppression
+cohen_d <- -0.25  # Cohen's d from the study
+cles_results <- d_to_CLES(cohen_d)
+
+# Convert results to data frame for display and visualization
+cles_df <- data.frame(
+  Metric = names(cles_results),
+  Value = unlist(cles_results) %>% as.numeric()
+)
+```
+
+Below are the computed common language effect sizes:
+
+```{r}
+knitr::kable(cles_df %>% head(), "pipe")
+```
+
+# Interpretation of results
+
+`Probability of Superiority` (`57%`): There is a `57%` chance that an animal randomly picked from the control group (no ALAN exposure) has higher melatonin levels than an animal randomly picked from the ALAN group.
+
+`Overlap` (`90%`): `90%` of the two groups overlap, meaning that despite the negative effect of ALAN, most animals in the exposed group still have melatonin levels comparable to those in the control group.
+
+`U1` (`18%`): `18%` of the ALAN group has melatonin levels completely outside the range of the control group, showing that a small proportion of animals are strongly affected.
+
+`U2` (`55%`): `55%` of the ALAN group exceeds the median of the control group, suggesting that the ALAN effect does not shift the entire distribution dramatically.
+
+`U3` (`60%`): `60%` of the ALAN group is above the mean of the control group, implying that ALAN exposure reduces melatonin levels, but the effect is modest.
+
+# Visualization of translated effects
+
+To provide an intuitive understanding of these effect sizes, we visualize them below.
+
+## Overlap
+
+This figure visually represents the 90% overlap between the two groups.
+
+```{r, warning=FALSE}
+# write a function to plot overlap visualization
+plot_overlap <- function(SD, cohen_d) {
+  
+  mean_control <- 0
+  mean_treatment <- abs(cohen_d)
+  
+  x_min <- mean_control - 3 * SD
+  x_max <- mean_treatment + 3 * SD
+  x <- seq(x_min, x_max, length.out = 20000)
+  
+  df_control <- data.frame("x" = x, "y" = dnorm(x, mean_control, SD))
+  df_treatment <- data.frame("x" = x, "y" = dnorm(x, mean_treatment, SD))
+  
+  poly_overlap <- data.frame("x" = x, "y" = pmin(df_control$y, df_treatment$y))
+  
+  overlap_fill <- "#1B9E77"  
+  control_fill <- "#7f8c8d"  
+  treatment_fill <- "#D95F02" 
+
+  ggplot() +
+    geom_polygon(data = df_control, aes(x = x, y = y, fill = "Control"), linewidth = 1) +
+    geom_polygon(data = df_treatment, aes(x = x, y = y, fill = "Treatment"), linewidth = 1) +
+    geom_polygon(data = poly_overlap, aes(x = x, y = y), fill = overlap_fill, alpha = 0.7) +
+    geom_vline(xintercept = mean_control, linetype = "dotted") +
+    geom_vline(xintercept = mean_treatment, linetype = "dotted") +
+    annotate("text", x = mean_control, y = dnorm(mean_control, mean_control, SD) * 1.1, label = "Control") +
+    annotate("text", x = mean_treatment, y = dnorm(mean_treatment, mean_treatment, SD) * 1.1, label = "ALAN-exposed") +
+    ggsci::scale_fill_npg() + 
+    theme_minimal() +
+    theme(legend.position = "none", axis.text.y = element_blank()) +
+    labs(x = "Melatonin levels (arbitrary unit)", y = "Density")
+}
+
+plot_overlap(sqrt(0.025), -0.25)
+```
+
+## U3
+
+This figure  illustrates the 60% of the ALAN-exposed group that is above the mean of the control group.
+
+```{r}
+# write a function to plot overlap U3
+plot_u3 <- function(cohen_d, SD) {
+  mean_control <- 0
+  mean_treatment <- abs(cohen_d)
+
+  x_min <- mean_control - 3 * SD
+  x_max <- mean_treatment + 3 * SD
+  x <- seq(x_min, x_max, length.out = 2e4)
+
+  df_control <- data.frame("x" = x, "y" = dnorm(x, mean_control, SD))
+  df_treatment <- data.frame("x" = x, "y" = dnorm(x, mean_treatment, SD))
+
+  poly_overlap <- data.frame("x" = x, "y" = pmin(df_control$y, df_treatment$y))
+
+  poly_u3 <- rbind(
+    data.frame("x" = x_min, "y" = 0),
+    poly_overlap[poly_overlap$x <= mean_control, ],
+    data.frame("x" = mean_control, "y" = 0)
+  )
+
+  control_fill <- "#7f8c8d"   
+  treatment_fill <- "#D95F02" 
+  u3_fill <- "#3498db"        
+
+  ggplot() +
+    geom_polygon(data = df_control, aes(x = x, y = y, fill = "Control"), linewidth = 1) +
+    geom_polygon(data = df_treatment, aes(x = x, y = y, fill = "Treatment"), linewidth = 1) +
+    geom_polygon(data = poly_u3, aes(x = x, y = y), fill = u3_fill, alpha = 0.7) +
+    geom_vline(xintercept = mean_control, linetype = "dotted") +
+    geom_vline(xintercept = mean_treatment, linetype = "dotted") +
+    annotate("text", x = mean_control, y = dnorm(mean_control, mean_control, SD) * 1.1, label = "Control") +
+    annotate("text", x = mean_treatment, y = dnorm(mean_treatment, mean_treatment, SD) * 1.1, label = "ALAN-exposed") +
+    ggsci::scale_fill_nejm() +
+    theme_minimal() +
+    theme(legend.position = "none", axis.text.y = element_blank()) +
+    labs(x = "Melatonin levels (arbitrary unit)", y = "Density")
+}
+
+plot_u3(-0.25, sqrt(0.025))
+```
+
+
+# Conclusion
+
+Translating effect sizes help contextualize `Cohen’s` d by providing probabilities and proportions that are easier to interpret. In this case, ALAN exposure is associated with a small but meaningful reduction in melatonin levels, with a 57% probability that a control animal has higher melatonin than an ALAN-exposed one, and an overlap of 90% between the two groups.
+
+These effect size conversions provide valuable insights for ecological and biological studies, aiding in clearer communication of research findings.
+
+# Package information
+
+```{r}
+subset(data.frame(sessioninfo::package_info()), attached==TRUE, c(package, loadedversion))
+```
+
